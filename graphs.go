@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"image/color"
-	"os"
+	"io"
 	"time"
 
 	"gonum.org/v1/gonum/stat"
@@ -184,24 +184,19 @@ func addCentroid(p *plot.Plot, xMean, yMean float64) error {
 	return nil
 }
 
-func createPlot(path, label string) (*os.File, *plot.Plot, error) {
-	f, err := os.Create(path)
-	if err != nil {
-		return nil, nil, fmt.Errorf("could not create %s: %v", path, err)
-	}
-
+func createPlot(label string) (*plot.Plot, error) {
 	p, err := plot.New()
 	if err != nil {
-		return nil, nil, fmt.Errorf("could not create plot: %v", err)
+		return nil, fmt.Errorf("could not create plot: %v", err)
 	}
 	p.Title.Text = label
 	p.Legend.Left = true
 	p.Legend.Top = true
 
-	return f, p, nil
+	return p, nil
 }
 
-func writePlot(f *os.File, p *plot.Plot, w, h vg.Length) error {
+func writePlot(f *io.PipeWriter, p *plot.Plot, w, h vg.Length) error {
 	wt, err := p.WriterTo(w, h, imageFormat)
 	if err != nil {
 		return fmt.Errorf("could not create writer: %v", err)
@@ -211,8 +206,6 @@ func writePlot(f *os.File, p *plot.Plot, w, h vg.Length) error {
 		return fmt.Errorf("could not write to file %v", err)
 	}
 
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("could not close output file %v", err)
-	}
+	f.Close()
 	return nil
 }

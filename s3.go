@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
-	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -49,25 +49,25 @@ func createBucket(name string) {
 	fmt.Printf("Bucket %q successfully created\n", name)
 }
 
-func uploadGraphs(files []os.FileInfo, bucketName string) {
+func pipeToS3(pipe *io.PipeReader, stackName string) {
+	bucketName := "mrhandy-graphs"
+	exists := checkBucketExists(bucketName)
+
+	if exists == false {
+		createBucket(bucketName)
+	}
+
 	sess := session.Must(session.NewSession(&aws.Config{Region: aws.String(region)}))
 	uploader := s3manager.NewUploader(sess)
-	for _, file := range files {
-		filename := imageLocation + "/" + file.Name()
-		f, fileReadErr := os.Open(filename)
-		if fileReadErr != nil {
-			log.Fatal(fmt.Sprintf("failed to open file %q, %v", filename, fileReadErr))
-		}
+	_, err := uploader.Upload(&s3manager.UploadInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(time.Now().Format("2006-01-02") + stackName + ".png"),
+		Body:   pipe,
+	})
 
-		_, uploadErr := uploader.Upload(&s3manager.UploadInput{
-			Bucket: aws.String(bucketName),
-			Key:    aws.String(time.Now().Format("2006-01-02") + "-" + file.Name()),
-			Body:   f,
-		})
-		if uploadErr != nil {
-			log.Fatal(fmt.Sprintf("failed to upload file, %v", uploadErr))
-		}
-
-		fmt.Printf("%v uploaded to s3 \n", filename)
+	if err != nil {
+		log.Fatal(fmt.Sprintf("Error occurred while piping graph to s3 for %v", stackName))
 	}
+
+	fmt.Println(fmt.Sprintf("Succesfully piped graph to s3 for %v", stackName))
 }

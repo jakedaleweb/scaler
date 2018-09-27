@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -34,7 +34,6 @@ func main() {
 	flag.BoolVar(&debug, "d", false, "debug")
 	flag.BoolVar(&showHistogram, "histogram", false, "show cpu histogram")
 	flag.StringVar(&region, "region", "ap-southeast-2", "AWS region")
-	flag.StringVar(&imageLocation, "image-location", imageLocation, "Directory to output graphs to must exist and be writeable")
 	flag.Parse()
 
 	webGroups := getWebGroups()
@@ -44,30 +43,12 @@ func main() {
 	for _, webGroup := range webGroups {
 		go func(webGroup asg) {
 			defer wg.Done()
-			doStack(imageLocation+"/"+webGroup.Name+"."+imageFormat, webGroup.Name, webGroup.AsgName, webGroup.RdsName)
+			doStack(webGroup.Name, webGroup.AsgName, webGroup.RdsName)
 
 		}(webGroup)
 	}
 
 	wg.Wait()
-
-	sendImagesToS3()
-}
-
-func sendImagesToS3() {
-	bucketName := "mrhandy-graphs"
-	exists := checkBucketExists(bucketName)
-
-	if exists == false {
-		createBucket(bucketName)
-	}
-
-	files, ListFilesErr := ioutil.ReadDir(imageLocation)
-	if ListFilesErr != nil {
-		log.Fatal(ListFilesErr)
-	}
-
-	uploadGraphs(files, bucketName)
 }
 
 func getWebGroups() []asg {
@@ -114,7 +95,7 @@ func autoScalingGroups(reg string) ([]string, error) {
 	return result, client.DescribeAutoScalingGroupsPages(input, fnc)
 }
 
-func doStack(imageName, stackName, asgName, rdsName string) {
+func doStack(stackName, asgName, rdsName string) {
 
 	period := NewPeriod(timeRange)
 
@@ -142,7 +123,7 @@ func doStack(imageName, stackName, asgName, rdsName string) {
 		return
 	}
 
-	f, p, err := createPlot(imageName, stackName)
+	p, err := createPlot(stackName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create plot for '%s': %v\n", stackName, err)
 		return
@@ -167,10 +148,9 @@ func doStack(imageName, stackName, asgName, rdsName string) {
 		}
 	}
 
-	// w/h - A4 (1:1.414)
-	if err := writePlot(f, p, 1024, 1024*(1/1.414)); err != nil {
-		fmt.Fprintf(os.Stderr, "Could not write out plot %v\n", err)
-		return
-	}
-
+	rPipe, wPipe := io.Pipe()
+	go func() {
+		writePlot(wPipe, p, 1024, 1024*(1/1.414))
+	}()
+	pipeToS3(rPipe, stackName)
 }
