@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -29,6 +28,11 @@ func checkBucketExists(name string) bool {
 }
 
 func createBucket(name string) {
+	exists := checkBucketExists(name)
+	if exists == true {
+		return
+	}
+
 	sess := session.Must(session.NewSession(&aws.Config{Region: aws.String(region)}))
 	svc := s3.New(sess)
 
@@ -50,19 +54,14 @@ func createBucket(name string) {
 	fmt.Printf("Bucket %q successfully created\n", name)
 }
 
-func pipeToS3(pipe *io.PipeReader, stackName string) {
-	bucketName := "mrhandy-graphs-" + os.Getenv("AWS_VAULT")
-	exists := checkBucketExists(bucketName)
-
-	if exists == false {
-		createBucket(bucketName)
-	}
-
+func pipeToS3(pipe *io.PipeReader, stackName string, bucketName string) string {
 	sess := session.Must(session.NewSession(&aws.Config{Region: aws.String(region)}))
 	uploader := s3manager.NewUploader(sess)
+
+	location := time.Now().Format("2006-01-02") + " " + stackName + ".png"
 	_, err := uploader.Upload(&s3manager.UploadInput{
 		Bucket: aws.String(bucketName),
-		Key:    aws.String(time.Now().Format("2006-01-02") + stackName + ".png"),
+		Key:    aws.String(location),
 		Body:   pipe,
 	})
 
@@ -70,5 +69,23 @@ func pipeToS3(pipe *io.PipeReader, stackName string) {
 		log.Fatal(fmt.Sprintf("Error occurred while piping graph to s3 for %v", stackName))
 	}
 
-	fmt.Printf("Succesfully piped graph to s3 for %v \n", stackName)
+	link := getPresignedLink(location, bucketName)
+	return link
+}
+
+func getPresignedLink(location string, bucketName string) string {
+	sess := session.Must(session.NewSession(&aws.Config{Region: aws.String(region)}))
+	svc := s3.New(sess)
+
+	req, _ := svc.GetObjectRequest(&s3.GetObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(location),
+	})
+	urlStr, err := req.Presign(1 * time.Hour)
+
+	if err != nil {
+		log.Fatal("Failed to sign request", err)
+	}
+
+	return urlStr
 }

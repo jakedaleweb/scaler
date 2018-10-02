@@ -41,12 +41,15 @@ func main() {
 
 	webGroups := getWebGroups()
 
+	bucketName := "mrhandy-graphs-" + os.Getenv("AWS_VAULT") + "-" + region
+	createBucket(bucketName)
+
 	var wg sync.WaitGroup
 	wg.Add(len(webGroups))
 	for _, webGroup := range webGroups {
 		go func(webGroup asg) {
 			defer wg.Done()
-			doStack(webGroup.Name, webGroup.AsgName, webGroup.RdsName)
+			doStack(webGroup.Name, webGroup.AsgName, webGroup.RdsName, bucketName)
 
 		}(webGroup)
 	}
@@ -98,9 +101,11 @@ func autoScalingGroups(reg string) ([]string, error) {
 	return result, client.DescribeAutoScalingGroupsPages(input, fnc)
 }
 
-func doStack(stackName, asgName, rdsName string) {
+func doStack(stackName, asgName, rdsName string, bucketName string) {
 
 	period := NewPeriod(timeRange)
+
+	message := ""
 
 	requests, err := getRequestMetric(stackName, period)
 	if err != nil {
@@ -144,15 +149,10 @@ func doStack(stackName, asgName, rdsName string) {
 			return
 		}
 
-		message := ""
 		if cpuMean > 70 {
 			message = fmt.Sprintf("%s is a candidate for upscaling, mean CPU: %0.1f%%\n", stackName, cpuMean)
 		} else if cpuMean < 30 {
 			message = fmt.Sprintf("%s is a candidate for downscaling, mean CPU: %0.1f%%\n", stackName, cpuMean)
-		}
-
-		if message != "" {
-			emailTeam(message)
 		}
 	}
 
@@ -160,7 +160,17 @@ func doStack(stackName, asgName, rdsName string) {
 	go func() {
 		writePlot(wPipe, p, 1024, 1024*(1/1.414))
 	}()
-	pipeToS3(rPipe, stackName)
+	imageLocation := pipeToS3(rPipe, stackName, bucketName)
+
+	if message != "" {
+		fmt.Println(message)
+		emailTeam("<p>" + message + "</p>" +
+			"<p><small>This image will be available for one hour from when this email is received. Otherwise you will need to log in to AWS account " +
+			os.Getenv("AWS_VAULT") +
+			".</small></p>" +
+			"<img style=\"width:500px;\" src=\"" +
+			imageLocation + "\"/>")
+	}
 }
 
 func emailTeam(message string) {
@@ -170,7 +180,8 @@ func emailTeam(message string) {
 
 	msg := "From: " + from + "\n" +
 		"To: " + to + "\n" +
-		"Subject: Mr Handy notification 🤖 \n\n" +
+		"Subject: Mr Handy notification 🤖 \n" +
+		"mime-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n\n" +
 		message
 
 	err := smtp.SendMail("smtp.gmail.com:587",
