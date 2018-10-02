@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -50,7 +51,7 @@ func createBucket(name string) {
 }
 
 func pipeToS3(pipe *io.PipeReader, stackName string) {
-	bucketName := "mrhandy-graphs"
+	bucketName := "mrhandy-graphs-" + os.Getenv("AWS_VAULT")
 	exists := checkBucketExists(bucketName)
 
 	if exists == false {
@@ -69,5 +70,5 @@ func pipeToS3(pipe *io.PipeReader, stackName string) {
 		log.Fatal(fmt.Sprintf("Error occurred while piping graph to s3 for %v", stackName))
 	}
 
-	fmt.Println(fmt.Sprintf("Succesfully piped graph to s3 for %v", stackName))
+	fmt.Printf("Succesfully piped graph to s3 for %v \n", stackName)
 }

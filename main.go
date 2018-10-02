@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/smtp"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go/service/autoscaling"
+	"github.com/subosito/gotenv"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -30,6 +32,7 @@ func (a xyz) XY(i int) (x, y float64)     { return a.x[i], a.y[i] }
 func (a xyz) XYZ(i int) (x, y, z float64) { return a.x[i], a.y[i], a.z[i] }
 
 func main() {
+	gotenv.Load()
 
 	flag.BoolVar(&debug, "d", false, "debug")
 	flag.BoolVar(&showHistogram, "histogram", false, "show cpu histogram")
@@ -141,10 +144,15 @@ func doStack(stackName, asgName, rdsName string) {
 			return
 		}
 
+		message := ""
 		if cpuMean > 70 {
-			fmt.Printf("%s is a candidate for upscaling, mean CPU: %0.1f%%\n", stackName, cpuMean)
+			message = fmt.Sprintf("%s is a candidate for upscaling, mean CPU: %0.1f%%\n", stackName, cpuMean)
 		} else if cpuMean < 30 {
-			fmt.Printf("%s is a candidate for downscaling, mean CPU: %0.1f%%\n", stackName, cpuMean)
+			message = fmt.Sprintf("%s is a candidate for downscaling, mean CPU: %0.1f%%\n", stackName, cpuMean)
+		}
+
+		if message != "" {
+			emailTeam(message)
 		}
 	}
 
@@ -153,4 +161,24 @@ func doStack(stackName, asgName, rdsName string) {
 		writePlot(wPipe, p, 1024, 1024*(1/1.414))
 	}()
 	pipeToS3(rPipe, stackName)
+}
+
+func emailTeam(message string) {
+	from := os.Getenv("EMAIL_USER")
+	pass := os.Getenv("EMAIL_PASSWORD")
+	to := os.Getenv("EMAIL_RECIPIENT")
+
+	msg := "From: " + from + "\n" +
+		"To: " + to + "\n" +
+		"Subject: Mr Handy notification 🤖 \n\n" +
+		message
+
+	err := smtp.SendMail("smtp.gmail.com:587",
+		smtp.PlainAuth("", from, pass, "smtp.gmail.com"),
+		from, []string{to}, []byte(msg))
+
+	if err != nil {
+		log.Printf("smtp error: %s", err)
+		return
+	}
 }

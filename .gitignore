@@ -2,3 +2,4 @@ failed.txt
 failed_rollback.txt
 success.txt
 scaler
+.env
